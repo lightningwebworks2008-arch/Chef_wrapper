@@ -53,8 +53,8 @@ const config: Config = {
           foreground: 'hsl(var(--card-foreground))',
         },
         gradient: {
-          start: '#3B82F6',  // blue-500
-          end: '#FBBF24',    // amber-400
+          start: '#8B5CF6',  // purple-500
+          end: '#A855F7',    // violet-500
         },
       },
       borderRadius: {

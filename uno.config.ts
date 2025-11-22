@@ -15,47 +15,47 @@ const BASE_COLORS = {
     900: '#171717',
     950: '#0A0A0A',
   },
-  // Blue gradient colors (replacing purple accent)
-  blue: {
-    50: '#EFF6FF',
-    100: '#DBEAFE',
-    200: '#BFDBFE',
-    300: '#93C5FD',
-    400: '#60A5FA',
-    500: '#3B82F6',  // Primary blue
-    600: '#2563EB',
-    700: '#1D4ED8',
-    800: '#1E40AF',
-    900: '#1E3A8A',
-    950: '#172554',
+  // Purple gradient colors (original bolt.diy theme)
+  purple: {
+    50: '#FAF5FF',
+    100: '#F3E8FF',
+    200: '#E9D5FF',
+    300: '#D8B4FE',
+    400: '#C084FC',
+    500: '#A855F7',  // Primary purple
+    600: '#9333EA',
+    700: '#7E22CE',
+    800: '#6B21A8',
+    900: '#581C87',
+    950: '#3B0764',
   },
-  // Yellow/Amber gradient colors
-  amber: {
-    50: '#FFFBEB',
-    100: '#FEF3C7',
-    200: '#FDE68A',
-    300: '#FCD34D',
-    400: '#FBBF24',  // Primary yellow
-    500: '#F59E0B',
-    600: '#D97706',
-    700: '#B45309',
-    800: '#92400E',
-    900: '#78350F',
-    950: '#451A03',
+  // Violet gradient colors
+  violet: {
+    50: '#F5F3FF',
+    100: '#EDE9FE',
+    200: '#DDD6FE',
+    300: '#C4B5FD',
+    400: '#A78BFA',
+    500: '#8B5CF6',  // Primary violet
+    600: '#7C3AED',
+    700: '#6D28D9',
+    800: '#5B21B6',
+    900: '#4C1D95',
+    950: '#2E1065',
   },
-  // Keep accent name for compatibility with bolt.diy (now blue)
+  // Keep accent name for compatibility with bolt.diy (purple)
   accent: {
-    50: '#EFF6FF',   // blue-50
-    100: '#DBEAFE',  // blue-100
-    200: '#BFDBFE',  // blue-200
-    300: '#93C5FD',  // blue-300
-    400: '#60A5FA',  // blue-400
-    500: '#3B82F6',  // blue-500 (primary accent)
-    600: '#2563EB',  // blue-600
-    700: '#1D4ED8',  // blue-700
-    800: '#1E40AF',  // blue-800
-    900: '#1E3A8A',  // blue-900
-    950: '#172554',  // blue-950
+    50: '#FAF5FF',   // purple-50
+    100: '#F3E8FF',  // purple-100
+    200: '#E9D5FF',  // purple-200
+    300: '#D8B4FE',  // purple-300
+    400: '#C084FC',  // purple-400
+    500: '#A855F7',  // purple-500 (primary accent)
+    600: '#9333EA',  // purple-600
+    700: '#7E22CE',  // purple-700
+    800: '#6B21A8',  // purple-800
+    900: '#581C87',  // purple-900
+    950: '#3B0764',  // purple-950
   },
   green: {
     50: '#F0FDF4',
@@ -99,7 +99,7 @@ export default defineConfig({
   shortcuts: {
     'bolt-ease-cubic-bezier': 'ease-[cubic-bezier(0.4,0,0.2,1)]',
     'transition-theme': 'transition-[background-color,border-color,color] duration-150 bolt-ease-cubic-bezier',
-    'gradient-text': 'bg-gradient-to-r from-blue-500 to-amber-400 bg-clip-text text-transparent',
+    'gradient-text': 'bg-gradient-to-r from-purple-500 to-violet-500 bg-clip-text text-transparent',
   },
   theme: {
     colors: {

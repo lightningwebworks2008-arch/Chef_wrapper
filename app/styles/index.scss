@@ -16,9 +16,9 @@ body {
 
 :root {
   --gradient-opacity: 0.8;
-  --primary-color: rgba(59, 130, 246, var(--gradient-opacity));   /* blue-500 */
-  --secondary-color: rgba(37, 99, 235, var(--gradient-opacity));  /* blue-600 */
-  --accent-color: rgba(251, 191, 36, var(--gradient-opacity));    /* amber-400 */
+  --primary-color: rgba(168, 85, 247, var(--gradient-opacity));   /* purple-500 */
+  --secondary-color: rgba(147, 51, 234, var(--gradient-opacity));  /* purple-600 */
+  --accent-color: rgba(139, 92, 246, var(--gradient-opacity));    /* violet-500 */
 }
 
 .modern-scrollbar {
