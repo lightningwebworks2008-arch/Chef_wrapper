@@ -12,7 +12,7 @@
     "type-check": "tsc --noEmit",
     "test": "vitest",
     "test:ui": "vitest --ui",
-    "deploy:cloudflare": "npx wrangler pages deploy dist --project-name=bolt-chef-unified"
+    "deploy:cloudflare": "npx wrangler pages deploy build/client --project-name=bolt-chef-unified"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^1.0.6",
