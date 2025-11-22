@@ -59,3 +59,6 @@ dist-ssr
 tmp/
 temp/
 *.tmp
+
+# bolt.diy source reference (do not track in git)
+bolt-diy-source/
