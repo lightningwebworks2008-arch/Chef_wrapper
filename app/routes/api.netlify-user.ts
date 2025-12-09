@@ -68,21 +68,68 @@ export const loader = withSecurity(netlifyUserLoader, {
 
 async function netlifyUserAction({ request, context }: { request: Request; context: any }) {
   try {
-    const formData = await request.formData();
-    const action = formData.get('action');
+    let action: string | null = null;
+    let providedToken: string | null = null;
 
-    // Get API keys from cookies (server-side only)
+    // Handle both JSON and form data
+    const contentType = request.headers.get('Content-Type') || '';
+
+    if (contentType.includes('application/json')) {
+      const jsonData = (await request.json()) as any;
+      action = jsonData.action;
+      providedToken = jsonData.token;
+    } else {
+      const formData = await request.formData();
+      action = formData.get('action') as string;
+      providedToken = formData.get('token') as string;
+    }
+
+    // Get API keys from cookies (server-side only) as fallback
     const cookieHeader = request.headers.get('Cookie');
     const apiKeys = getApiKeysFromCookie(cookieHeader);
 
-    // Try to get Netlify token from various sources
+    // Use provided token first, then fall back to stored tokens
     const netlifyToken =
+      providedToken ||
       apiKeys.VITE_NETLIFY_ACCESS_TOKEN ||
       context?.cloudflare?.env?.VITE_NETLIFY_ACCESS_TOKEN ||
       process.env.VITE_NETLIFY_ACCESS_TOKEN;
 
     if (!netlifyToken) {
       return json({ error: 'Netlify token not found' }, { status: 401 });
+    }
+
+    // If no action specified, validate the token and return user info
+    if (!action) {
+      const response = await fetch('https://api.netlify.com/api/v1/user', {
+        headers: {
+          Authorization: `Bearer ${netlifyToken}`,
+          'User-Agent': 'bolt.diy-app',
+        },
+      });
+
+      if (!response.ok) {
+        if (response.status === 401) {
+          return json({ error: 'Invalid Netlify token' }, { status: 401 });
+        }
+        throw new Error(`Netlify API error: ${response.status}`);
+      }
+
+      const userData = (await response.json()) as {
+        id: string;
+        name: string | null;
+        email: string;
+        avatar_url: string | null;
+        full_name: string | null;
+      };
+
+      return json({
+        id: userData.id,
+        name: userData.name,
+        email: userData.email,
+        avatar_url: userData.avatar_url,
+        full_name: userData.full_name,
+      });
     }
 
     if (action === 'get_sites') {

@@ -57,14 +57,36 @@ const fuzzyMatch = (query: string, text: string): { score: number; matches: bool
   };
 };
 
+/**
+ * Safely escapes HTML characters to prevent XSS attacks
+ */
+const escapeHtml = (text: string): string => {
+  const htmlEscapes: Record<string, string> = {
+    '&': '&amp;',
+    '<': '&lt;',
+    '>': '&gt;',
+    '"': '&quot;',
+    "'": '&#39;',
+  };
+  return text.replace(/[&<>"']/g, (char) => htmlEscapes[char] || char);
+};
+
+/**
+ * Safely highlights matching text by escaping HTML first, then adding highlight marks
+ */
 const highlightText = (text: string, query: string): string => {
   if (!query) {
-    return text;
+    return escapeHtml(text);
   }
 
-  const regex = new RegExp(`(${query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'gi');
+  // First escape the text to prevent XSS
+  const escapedText = escapeHtml(text);
+  const escapedQuery = escapeHtml(query);
+  
+  // Create regex from escaped query (also escape regex special chars)
+  const regex = new RegExp(`(${escapedQuery.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'gi');
 
-  return text.replace(regex, '<mark class="bg-yellow-200 dark:bg-yellow-800 text-current">$1</mark>');
+  return escapedText.replace(regex, '<mark class="bg-yellow-200 dark:bg-yellow-800 text-current">$1</mark>');
 };
 
 const formatContextSize = (tokens: number): string => {

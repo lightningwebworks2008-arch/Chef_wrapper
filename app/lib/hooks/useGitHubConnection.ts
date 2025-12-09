@@ -71,13 +71,16 @@ export function useGitHubConnection(): UseGitHubConnectionReturn {
     }
 
     try {
-      // Make direct API call instead of using hook
-      const response = await fetch('https://api.github.com/user', {
+      // Use server-side API proxy for security - tokens stay on server
+      const response = await fetch('/api/github-user', {
+        method: 'POST',
         headers: {
-          Accept: 'application/vnd.github.v3+json',
-          Authorization: `${connection.tokenType === 'classic' ? 'token' : 'Bearer'} ${connection.token}`,
-          'User-Agent': 'Bolt.diy',
+          'Content-Type': 'application/json',
         },
+        body: JSON.stringify({
+          token: connection.token,
+          tokenType: connection.tokenType,
+        }),
       });
 
       if (!response.ok) {
@@ -112,21 +115,25 @@ export function useGitHubConnection(): UseGitHubConnectionReturn {
     setError(null);
 
     try {
-      console.log('Making API request to GitHub...');
+      console.log('Making API request to GitHub via secure proxy...');
 
-      // Test the token by fetching user info
-      const response = await fetch('https://api.github.com/user', {
+      // Use server-side API proxy for security - tokens validated server-side
+      const response = await fetch('/api/github-user', {
+        method: 'POST',
         headers: {
-          Accept: 'application/vnd.github.v3+json',
-          Authorization: `${tokenType === 'classic' ? 'token' : 'Bearer'} ${token}`,
-          'User-Agent': 'Bolt.diy',
+          'Content-Type': 'application/json',
         },
+        body: JSON.stringify({
+          token,
+          tokenType,
+        }),
       });
 
       console.log('GitHub API response status:', response.status, response.statusText);
 
       if (!response.ok) {
-        throw new Error(`Authentication failed: ${response.status} ${response.statusText}`);
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error || `Authentication failed: ${response.status} ${response.statusText}`);
       }
 
       const userData = (await response.json()) as GitHubUserResponse;
@@ -219,13 +226,16 @@ export function useGitHubConnection(): UseGitHubConnectionReturn {
         return response.ok;
       }
 
-      // For client-side connections, test directly
-      const response = await fetch('https://api.github.com/user', {
+      // For client-side connections, test via secure API proxy
+      const response = await fetch('/api/github-user', {
+        method: 'POST',
         headers: {
-          Accept: 'application/vnd.github.v3+json',
-          Authorization: `${connection.tokenType === 'classic' ? 'token' : 'Bearer'} ${connection.token}`,
-          'User-Agent': 'Bolt.diy',
+          'Content-Type': 'application/json',
         },
+        body: JSON.stringify({
+          token: connection.token,
+          tokenType: connection.tokenType,
+        }),
       });
 
       return response.ok;
