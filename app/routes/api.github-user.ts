@@ -76,6 +76,8 @@ async function githubUserAction({ request, context }: { request: Request; contex
     let repoFullName: string | null = null;
     let searchQuery: string | null = null;
     let perPage: number = 30;
+    let providedToken: string | null = null;
+    let tokenType: 'classic' | 'fine-grained' = 'fine-grained';
 
     // Handle both JSON and form data
     const contentType = request.headers.get('Content-Type') || '';
@@ -86,20 +88,26 @@ async function githubUserAction({ request, context }: { request: Request; contex
       repoFullName = jsonData.repo;
       searchQuery = jsonData.query;
       perPage = jsonData.per_page || 30;
+      // Accept token from request body for secure token validation
+      providedToken = jsonData.token;
+      tokenType = jsonData.tokenType || 'fine-grained';
     } else {
       const formData = await request.formData();
       action = formData.get('action') as string;
       repoFullName = formData.get('repo') as string;
       searchQuery = formData.get('query') as string;
       perPage = parseInt(formData.get('per_page') as string) || 30;
+      providedToken = formData.get('token') as string;
+      tokenType = (formData.get('tokenType') as 'classic' | 'fine-grained') || 'fine-grained';
     }
 
-    // Get API keys from cookies (server-side only)
+    // Get API keys from cookies (server-side only) as fallback
     const cookieHeader = request.headers.get('Cookie');
     const apiKeys = getApiKeysFromCookie(cookieHeader);
 
-    // Try to get GitHub token from various sources
+    // Use provided token first, then fall back to stored tokens
     const githubToken =
+      providedToken ||
       apiKeys.GITHUB_API_KEY ||
       apiKeys.VITE_GITHUB_ACCESS_TOKEN ||
       context?.cloudflare?.env?.GITHUB_TOKEN ||
@@ -109,6 +117,41 @@ async function githubUserAction({ request, context }: { request: Request; contex
 
     if (!githubToken) {
       return json({ error: 'GitHub token not found' }, { status: 401 });
+    }
+
+    // If no action specified, validate the token and return user info
+    if (!action) {
+      const authHeader = tokenType === 'classic' ? `token ${githubToken}` : `Bearer ${githubToken}`;
+      const response = await fetch('https://api.github.com/user', {
+        headers: {
+          Accept: 'application/vnd.github.v3+json',
+          Authorization: authHeader,
+          'User-Agent': 'bolt.diy-app',
+        },
+      });
+
+      if (!response.ok) {
+        if (response.status === 401) {
+          return json({ error: 'Invalid GitHub token' }, { status: 401 });
+        }
+        throw new Error(`GitHub API error: ${response.status}`);
+      }
+
+      const userData = (await response.json()) as {
+        login: string;
+        name: string | null;
+        avatar_url: string;
+        html_url: string;
+        type: string;
+      };
+
+      return json({
+        login: userData.login,
+        name: userData.name,
+        avatar_url: userData.avatar_url,
+        html_url: userData.html_url,
+        type: userData.type,
+      });
     }
 
     if (action === 'get_repos') {

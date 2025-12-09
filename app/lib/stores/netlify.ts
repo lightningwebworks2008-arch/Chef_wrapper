@@ -36,14 +36,20 @@ export async function initializeNetlifyConnection() {
   try {
     isConnecting.set(true);
 
-    const response = await fetch('https://api.netlify.com/api/v1/user', {
+    // Use server-side API proxy for security - tokens validated server-side
+    const response = await fetch('/api/netlify-user', {
+      method: 'POST',
       headers: {
-        Authorization: `Bearer ${envToken}`,
+        'Content-Type': 'application/json',
       },
+      body: JSON.stringify({
+        token: envToken,
+      }),
     });
 
     if (!response.ok) {
-      throw new Error(`Failed to connect to Netlify: ${response.statusText}`);
+      const errorData = await response.json().catch(() => ({}));
+      throw new Error(errorData.error || `Failed to connect to Netlify: ${response.statusText}`);
     }
 
     const userData = await response.json();
@@ -85,15 +91,21 @@ export async function fetchNetlifyStats(token: string) {
   try {
     isFetchingStats.set(true);
 
-    const sitesResponse = await fetch('https://api.netlify.com/api/v1/sites', {
+    // Use server-side API proxy for security - tokens validated server-side
+    const sitesResponse = await fetch('/api/netlify-user', {
+      method: 'POST',
       headers: {
-        Authorization: `Bearer ${token}`,
         'Content-Type': 'application/json',
       },
+      body: JSON.stringify({
+        token,
+        action: 'get_sites',
+      }),
     });
 
     if (!sitesResponse.ok) {
-      throw new Error(`Failed to fetch sites: ${sitesResponse.status}`);
+      const errorData = await sitesResponse.json().catch(() => ({}));
+      throw new Error(errorData.error || `Failed to fetch sites: ${sitesResponse.status}`);
     }
 
     const sites = (await sitesResponse.json()) as any;
