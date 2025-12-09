@@ -12,34 +12,6 @@
     "strict": true,
     "allowJs": true,
     "skipLibCheck": true,
-    "verbatimModuleSyntax": true,
-    "forceConsistentCasingInFileNames": true,
-    "noUnusedLocals": true,
-    "noUnusedParameters": true,
-    "noFallthroughCasesInSwitch": true,
-    "baseUrl": ".",
-    "paths": {
-      "@/*": ["./app/*"],
-      "@/components/*": ["./app/components/*"],
-      "@/lib/*": ["./app/lib/*"],
-      "@/hooks/*": ["./app/hooks/*"],
-      "@/types/*": ["./app/types/*"],
-      "@/stores/*": ["./app/stores/*"]
-    },
-   {
-  "compilerOptions": {
-    "lib": ["DOM", "DOM.Iterable", "ES2020"],
-    "types": ["vite/client"],
-    "isolatedModules": true,
-    "esModuleInterop": true,
-    "jsx": "react-jsx",
-    "module": "ESNext",
-    "moduleResolution": "Bundler",
-    "resolveJsonModule": true,
-    "target": "ES2020",
-    "strict": true,
-    "allowJs": true,
-    "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
     "baseUrl": ".",
     "paths": {
@@ -47,10 +19,5 @@
     }
   },
   "include": ["src"],
-  "references": [{ "path": "./tsconfig.node.json" }]
-}
-
-  },
-  "include": ["app", "convex", "vite.config.ts"],
   "references": [{ "path": "./tsconfig.node.json" }]
 }
