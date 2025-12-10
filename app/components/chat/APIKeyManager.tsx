@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { IconButton } from '~/components/ui/IconButton';
 import type { ProviderInfo } from '~/types/model';
-import Cookies from 'js-cookie';
+import { supabase } from '~/integrations/supabase/client';
 
 interface APIKeyManagerProps {
   provider: ProviderInfo;
@@ -14,39 +14,108 @@ interface APIKeyManagerProps {
 // cache which stores whether the provider's API key is set via environment variable
 const providerEnvKeyStatusCache: Record<string, boolean> = {};
 
-const apiKeyMemoizeCache: { [k: string]: Record<string, string> } = {};
+// Session ID for LLM proxy
+let llmSessionId: string | null = null;
 
-export function getApiKeysFromCookies() {
-  const storedApiKeys = Cookies.get('apiKeys');
-  let parsedKeys: Record<string, string> = {};
-
-  if (storedApiKeys) {
-    parsedKeys = apiKeyMemoizeCache[storedApiKeys];
-
-    if (!parsedKeys) {
-      parsedKeys = apiKeyMemoizeCache[storedApiKeys] = JSON.parse(storedApiKeys);
-    }
+// Get or create LLM session
+async function getOrCreateSession(): Promise<string> {
+  if (llmSessionId) {
+    return llmSessionId;
   }
 
-  return parsedKeys;
+  // Check sessionStorage for existing session
+  const storedSessionId = sessionStorage.getItem('llm_session_id');
+  if (storedSessionId) {
+    llmSessionId = storedSessionId;
+    return storedSessionId;
+  }
+
+  // Create new session via edge function
+  const { data, error } = await supabase.functions.invoke('llm-proxy', {
+    body: { action: 'get_session' },
+  });
+
+  if (error) {
+    throw new Error(error.message || 'Failed to create LLM session');
+  }
+
+  llmSessionId = data.sessionId;
+  sessionStorage.setItem('llm_session_id', data.sessionId);
+  return data.sessionId;
+}
+
+// Check if provider has key set
+async function checkProviderKey(provider: string): Promise<boolean> {
+  try {
+    const sessionId = await getOrCreateSession();
+    const { data, error } = await supabase.functions.invoke('llm-proxy', {
+      body: {
+        action: 'check_key',
+        sessionId,
+        provider,
+      },
+    });
+
+    if (error) {
+      return false;
+    }
+
+    return data.hasKey;
+  } catch {
+    return false;
+  }
+}
+
+// Set provider API key (server-side only)
+async function setProviderKey(provider: string, apiKey: string): Promise<void> {
+  const sessionId = await getOrCreateSession();
+  const { error } = await supabase.functions.invoke('llm-proxy', {
+    body: {
+      action: 'set_key',
+      sessionId,
+      provider,
+      apiKey,
+    },
+  });
+
+  if (error) {
+    throw new Error(error.message || 'Failed to save API key');
+  }
+}
+
+// Remove provider API key
+async function removeProviderKey(provider: string): Promise<void> {
+  const sessionId = await getOrCreateSession();
+  await supabase.functions.invoke('llm-proxy', {
+    body: {
+      action: 'remove_key',
+      sessionId,
+      provider,
+    },
+  });
 }
 
 // eslint-disable-next-line @typescript-eslint/naming-convention
 export const APIKeyManager: React.FC<APIKeyManagerProps> = ({ provider, apiKey, setApiKey }) => {
   const [isEditing, setIsEditing] = useState(false);
-  const [tempKey, setTempKey] = useState(apiKey);
+  const [tempKey, setTempKey] = useState('');
   const [isEnvKeySet, setIsEnvKeySet] = useState(false);
+  const [hasServerKey, setHasServerKey] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
 
-  // Reset states and load saved key when provider changes
+  // Check for server-side key when provider changes
   useEffect(() => {
-    // Load saved API key from cookies for this provider
-    const savedKeys = getApiKeysFromCookies();
-    const savedKey = savedKeys[provider.name] || '';
-
-    setTempKey(savedKey);
-    setApiKey(savedKey);
+    const checkKey = async () => {
+      const hasKey = await checkProviderKey(provider.name);
+      setHasServerKey(hasKey);
+      if (hasKey) {
+        setApiKey('[SERVER_STORED]'); // Indicate key is stored server-side
+      }
+    };
+    checkKey();
+    setTempKey('');
     setIsEditing(false);
-  }, [provider.name]);
+  }, [provider.name, setApiKey]);
 
   const checkEnvApiKey = useCallback(async () => {
     // Check cache first
@@ -73,17 +142,42 @@ export const APIKeyManager: React.FC<APIKeyManagerProps> = ({ provider, apiKey, 
     checkEnvApiKey();
   }, [checkEnvApiKey]);
 
-  const handleSave = () => {
-    // Save to parent state
-    setApiKey(tempKey);
+  const handleSave = async () => {
+    if (!tempKey.trim()) {
+      return;
+    }
 
-    // Save to cookies
-    const currentKeys = getApiKeysFromCookies();
-    const newKeys = { ...currentKeys, [provider.name]: tempKey };
-    Cookies.set('apiKeys', JSON.stringify(newKeys));
-
-    setIsEditing(false);
+    setIsLoading(true);
+    try {
+      // Save to server-side only via edge function
+      await setProviderKey(provider.name, tempKey);
+      
+      // Update local state to indicate key is set (but don't store the actual key)
+      setApiKey('[SERVER_STORED]');
+      setHasServerKey(true);
+      setIsEditing(false);
+      setTempKey('');
+    } catch (error) {
+      console.error('Failed to save API key:', error);
+    } finally {
+      setIsLoading(false);
+    }
   };
+
+  const handleRemove = async () => {
+    setIsLoading(true);
+    try {
+      await removeProviderKey(provider.name);
+      setApiKey('');
+      setHasServerKey(false);
+    } catch (error) {
+      console.error('Failed to remove API key:', error);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const isKeySet = hasServerKey || apiKey === '[SERVER_STORED]';
 
   return (
     <div className="flex items-center justify-between py-3 px-1">
@@ -92,10 +186,10 @@ export const APIKeyManager: React.FC<APIKeyManagerProps> = ({ provider, apiKey, 
           <span className="text-sm font-medium text-bolt-elements-textSecondary">{provider?.name} API Key:</span>
           {!isEditing && (
             <div className="flex items-center gap-2">
-              {apiKey ? (
+              {isKeySet ? (
                 <>
                   <div className="i-ph:check-circle-fill text-green-500 w-4 h-4" />
-                  <span className="text-xs text-green-500">Set via UI</span>
+                  <span className="text-xs text-green-500">Set (stored securely)</span>
                 </>
               ) : isEnvKeySet ? (
                 <>
@@ -124,34 +218,49 @@ export const APIKeyManager: React.FC<APIKeyManagerProps> = ({ provider, apiKey, 
               className="w-[300px] px-3 py-1.5 text-sm rounded border border-bolt-elements-borderColor 
                         bg-bolt-elements-prompt-background text-bolt-elements-textPrimary 
                         focus:outline-none focus:ring-2 focus:ring-bolt-elements-focus"
+              disabled={isLoading}
             />
             <IconButton
               onClick={handleSave}
               title="Save API Key"
               className="bg-green-500/10 hover:bg-green-500/20 text-green-500"
+              disabled={isLoading || !tempKey.trim()}
             >
               <div className="i-ph:check w-4 h-4" />
             </IconButton>
             <IconButton
-              onClick={() => setIsEditing(false)}
+              onClick={() => {
+                setIsEditing(false);
+                setTempKey('');
+              }}
               title="Cancel"
               className="bg-red-500/10 hover:bg-red-500/20 text-red-500"
+              disabled={isLoading}
             >
               <div className="i-ph:x w-4 h-4" />
             </IconButton>
           </div>
         ) : (
           <>
-            {
+            {isKeySet && (
               <IconButton
-                onClick={() => setIsEditing(true)}
-                title="Edit API Key"
-                className="bg-blue-500/10 hover:bg-blue-500/20 text-blue-500"
+                onClick={handleRemove}
+                title="Remove API Key"
+                className="bg-red-500/10 hover:bg-red-500/20 text-red-500"
+                disabled={isLoading}
               >
-                <div className="i-ph:pencil-simple w-4 h-4" />
+                <div className="i-ph:trash w-4 h-4" />
               </IconButton>
-            }
-            {provider?.getApiKeyLink && !apiKey && (
+            )}
+            <IconButton
+              onClick={() => setIsEditing(true)}
+              title={isKeySet ? "Update API Key" : "Add API Key"}
+              className="bg-blue-500/10 hover:bg-blue-500/20 text-blue-500"
+              disabled={isLoading}
+            >
+              <div className="i-ph:pencil-simple w-4 h-4" />
+            </IconButton>
+            {provider?.getApiKeyLink && !isKeySet && (
               <IconButton
                 onClick={() => window.open(provider?.getApiKeyLink)}
                 title="Get API Key"
@@ -167,3 +276,22 @@ export const APIKeyManager: React.FC<APIKeyManagerProps> = ({ provider, apiKey, 
     </div>
   );
 };
+
+// Export function to get API keys from server session (for use in API calls)
+export async function getApiKeyForProvider(provider: string): Promise<string | null> {
+  try {
+    const sessionId = await getOrCreateSession();
+    const hasKey = await checkProviderKey(provider);
+    if (hasKey) {
+      // Return a marker that indicates key should be fetched from server
+      // The actual API call should be made through the LLM proxy
+      return '[SERVER_STORED]';
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+// Export the session getter for use in LLM API calls
+export { getOrCreateSession as getLLMSessionId };

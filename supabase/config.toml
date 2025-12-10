@@ -1,1 +1,10 @@
 project_id = "rtuxsybcnsuvhhpvwibn"
+
+[functions.github-proxy]
+verify_jwt = false
+
+[functions.netlify-proxy]
+verify_jwt = false
+
+[functions.llm-proxy]
+verify_jwt = false
