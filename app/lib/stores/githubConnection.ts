@@ -1,44 +1,40 @@
 import { atom, computed } from 'nanostores';
-import Cookies from 'js-cookie';
 import { logStore } from '~/lib/stores/logs';
 import { gitHubApiService } from '~/lib/services/githubApiService';
 import { calculateStatsSummary } from '~/utils/githubStats';
 import type { GitHubConnection } from '~/types/GitHub';
+import { supabase } from '~/integrations/supabase/client';
 
-// Auto-connect using environment variable
-const envToken = import.meta.env?.VITE_GITHUB_ACCESS_TOKEN;
-const envTokenType = import.meta.env?.VITE_GITHUB_TOKEN_TYPE;
+// Session ID stored client-side (not the actual token)
+let githubSessionId: string | null = null;
 
 const githubConnectionAtom = atom<GitHubConnection>({
   user: null,
-  token: envToken || '',
-  tokenType:
-    envTokenType === 'classic' || envTokenType === 'fine-grained'
-      ? (envTokenType as 'classic' | 'fine-grained')
-      : 'classic',
+  token: '', // No longer stored client-side, just for backwards compatibility
+  tokenType: 'classic',
 });
 
-// Initialize connection from localStorage on startup
+// Initialize connection from sessionStorage (only session ID, not token)
 function initializeConnection() {
   try {
-    const savedConnection = localStorage.getItem('github_connection');
+    const savedSessionId = sessionStorage.getItem('github_session_id');
+    const savedUserData = sessionStorage.getItem('github_user_data');
 
-    if (savedConnection) {
-      const parsed = JSON.parse(savedConnection);
-
-      // Ensure tokenType is set
-      if (!parsed.tokenType) {
-        parsed.tokenType = 'classic';
-      }
-
-      // Only set if we have a valid user
-      if (parsed.user) {
-        githubConnectionAtom.set(parsed);
-      }
+    if (savedSessionId && savedUserData) {
+      githubSessionId = savedSessionId;
+      const userData = JSON.parse(savedUserData);
+      githubConnectionAtom.set({
+        user: userData.user,
+        token: '', // Token is server-side only
+        tokenType: userData.tokenType || 'classic',
+        rateLimit: userData.rateLimit,
+        stats: userData.stats,
+      });
     }
   } catch (error) {
     console.error('Error initializing GitHub connection:', error);
-    localStorage.removeItem('github_connection');
+    sessionStorage.removeItem('github_session_id');
+    sessionStorage.removeItem('github_user_data');
   }
 }
 
@@ -68,7 +64,10 @@ export const githubConnectionStore = {
   // Get current connection
   get: () => githubConnectionAtom.get(),
 
-  // Connect to GitHub
+  // Get session ID (for API calls)
+  getSessionId: () => githubSessionId,
+
+  // Connect to GitHub via secure edge function
   async connect(token: string, tokenType: 'classic' | 'fine-grained' = 'classic'): Promise<void> {
     if (isGitHubConnecting.get()) {
       throw new Error('Connection already in progress');
@@ -77,31 +76,48 @@ export const githubConnectionStore = {
     isGitHubConnecting.set(true);
 
     try {
-      // Fetch user data
-      const { user, rateLimit } = await gitHubApiService.fetchUser(token, tokenType);
+      // Create session via edge function - token is sent once and stored server-side
+      const { data, error } = await supabase.functions.invoke('github-proxy', {
+        body: {
+          action: 'create_session',
+          token,
+          tokenType,
+        },
+      });
 
-      // Create connection object
+      if (error) {
+        throw new Error(error.message || 'Failed to connect to GitHub');
+      }
+
+      if (!data.sessionId || !data.user) {
+        throw new Error(data.error || 'Invalid response from server');
+      }
+
+      // Store session ID client-side (not the token!)
+      githubSessionId = data.sessionId;
+      sessionStorage.setItem('github_session_id', data.sessionId);
+
+      // Create connection object (without token)
       const connection: GitHubConnection = {
-        user,
-        token,
+        user: data.user,
+        token: '', // Token is server-side only
         tokenType,
-        rateLimit,
+        rateLimit: data.rateLimit,
       };
 
-      // Set cookies for client-side access
-      Cookies.set('githubUsername', user.login);
-      Cookies.set('githubToken', token);
-      Cookies.set('git:github.com', JSON.stringify({ username: token, password: 'x-oauth-basic' }));
-
-      // Store connection details in localStorage
-      localStorage.setItem('github_connection', JSON.stringify(connection));
+      // Store user data (not token) in sessionStorage
+      sessionStorage.setItem('github_user_data', JSON.stringify({
+        user: data.user,
+        tokenType,
+        rateLimit: data.rateLimit,
+      }));
 
       // Update atom
       githubConnectionAtom.set(connection);
 
       logStore.logInfo('Connected to GitHub', {
         type: 'system',
-        message: `Connected to GitHub as ${user.login}`,
+        message: `Connected to GitHub as ${data.user.login}`,
       });
 
       // Fetch stats in background
@@ -121,7 +137,21 @@ export const githubConnectionStore = {
   },
 
   // Disconnect from GitHub
-  disconnect(): void {
+  async disconnect(): Promise<void> {
+    // Destroy session on server
+    if (githubSessionId) {
+      try {
+        await supabase.functions.invoke('github-proxy', {
+          body: {
+            action: 'destroy_session',
+            sessionId: githubSessionId,
+          },
+        });
+      } catch (error) {
+        console.error('Error destroying GitHub session:', error);
+      }
+    }
+
     // Clear atoms
     githubConnectionAtom.set({
       user: null,
@@ -129,13 +159,10 @@ export const githubConnectionStore = {
       tokenType: 'classic',
     });
 
-    // Clear localStorage
-    localStorage.removeItem('github_connection');
-
-    // Clear cookies
-    Cookies.remove('githubUsername');
-    Cookies.remove('githubToken');
-    Cookies.remove('git:github.com');
+    // Clear session storage
+    githubSessionId = null;
+    sessionStorage.removeItem('github_session_id');
+    sessionStorage.removeItem('github_user_data');
 
     // Clear API service cache
     gitHubApiService.clearCache();
@@ -146,11 +173,44 @@ export const githubConnectionStore = {
     });
   },
 
+  // Make authenticated GitHub API request via proxy
+  async proxyRequest(endpoint: string, method = 'GET', body?: unknown): Promise<unknown> {
+    if (!githubSessionId) {
+      throw new Error('Not connected to GitHub');
+    }
+
+    const { data, error } = await supabase.functions.invoke('github-proxy', {
+      body: {
+        action: 'proxy',
+        sessionId: githubSessionId,
+        endpoint,
+        method,
+        body,
+      },
+    });
+
+    if (error) {
+      throw new Error(error.message || 'API request failed');
+    }
+
+    if (data.status === 401) {
+      // Session expired, disconnect
+      logStore.logError('GitHub session expired', {
+        type: 'system',
+        message: 'GitHub session has expired. Please reconnect your account.',
+      });
+      await this.disconnect();
+      throw new Error('Session expired');
+    }
+
+    return data.data;
+  },
+
   // Fetch GitHub stats
   async fetchStats(): Promise<void> {
     const connection = githubConnectionAtom.get();
 
-    if (!connection.user || !connection.token) {
+    if (!connection.user || !githubSessionId) {
       throw new Error('Not connected to GitHub');
     }
 
@@ -161,7 +221,18 @@ export const githubConnectionStore = {
     isGitHubLoadingStats.set(true);
 
     try {
-      const stats = await gitHubApiService.fetchStats(connection.token, connection.tokenType);
+      // Fetch stats via proxy
+      const [repos, gists] = await Promise.all([
+        this.proxyRequest('/user/repos?per_page=100&sort=updated'),
+        this.proxyRequest('/gists?per_page=100'),
+      ]);
+
+      const stats = {
+        repos: repos as any[],
+        gists: gists as any[],
+        totalRepos: (repos as any[]).length,
+        totalGists: (gists as any[]).length,
+      };
 
       // Update connection with stats
       const updatedConnection: GitHubConnection = {
@@ -169,8 +240,13 @@ export const githubConnectionStore = {
         stats,
       };
 
-      // Update localStorage
-      localStorage.setItem('github_connection', JSON.stringify(updatedConnection));
+      // Update sessionStorage
+      const savedUserData = sessionStorage.getItem('github_user_data');
+      if (savedUserData) {
+        const userData = JSON.parse(savedUserData);
+        userData.stats = stats;
+        sessionStorage.setItem('github_user_data', JSON.stringify(userData));
+      }
 
       // Update atom
       githubConnectionAtom.set(updatedConnection);
@@ -181,16 +257,6 @@ export const githubConnectionStore = {
       });
     } catch (error) {
       console.error('Failed to fetch GitHub stats:', error);
-
-      // If the error is due to expired token, disconnect
-      if (error instanceof Error && error.message.includes('401')) {
-        logStore.logError('GitHub token has expired', {
-          type: 'system',
-          message: 'GitHub token has expired. Please reconnect your account.',
-        });
-        this.disconnect();
-      }
-
       throw error;
     } finally {
       isGitHubLoadingStats.set(false);
@@ -206,16 +272,18 @@ export const githubConnectionStore = {
     };
 
     githubConnectionAtom.set(updatedConnection);
-    localStorage.setItem('github_connection', JSON.stringify(updatedConnection));
+    
+    const savedUserData = sessionStorage.getItem('github_user_data');
+    if (savedUserData) {
+      const userData = JSON.parse(savedUserData);
+      userData.tokenType = tokenType;
+      sessionStorage.setItem('github_user_data', JSON.stringify(userData));
+    }
   },
 
   // Clear stats cache
   clearCache(): void {
-    const connection = githubConnectionAtom.get();
-
-    if (connection.token) {
-      gitHubApiService.clearUserCache(connection.token);
-    }
+    gitHubApiService.clearCache();
   },
 
   // Subscribe to connection changes
